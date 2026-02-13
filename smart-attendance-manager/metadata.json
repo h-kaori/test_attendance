@@ -1,0 +1,7 @@
+{
+  "name": "Smart Attendance Manager",
+  "description": "A multilingual, high-accessibility employee attendance tracking system with QR code validation and admin management capabilities.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
