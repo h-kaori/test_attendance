@@ -5,251 +5,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Smart Attendance Manager</title>
-    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- QR Code Library -->
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <!-- React & Babel for in-browser JSX transformation -->
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <!-- Lucide Icons via ESM -->
-    <script type="module">
-        import * as lucide from 'https://esm.sh/lucide-react@0.463.0';
-        window.Lucide = lucide;
-    </script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&family=Noto+Sans+JP:wght@400;700;900&display=swap');
         body { font-family: 'Inter', 'Noto Sans JP', sans-serif; }
     </style>
-<script type="importmap">
+    <script type="importmap">
 {
   "imports": {
-    "react": "https://esm.sh/react@^19.2.4",
-    "react-dom/": "https://esm.sh/react-dom@^19.2.4/",
-    "react/": "https://esm.sh/react@^19.2.4/",
-    "lucide-react": "https://esm.sh/lucide-react@^0.563.0"
+    "react": "https://esm.sh/react@19.0.0",
+    "react-dom/": "https://esm.sh/react-dom@19.0.0/",
+    "lucide-react": "https://esm.sh/lucide-react@0.463.0?external=react",
+    "react/": "https://esm.sh/react@^19.2.4/"
   }
 }
 </script>
+<link rel="stylesheet" href="/index.css">
 </head>
 <body class="bg-gray-50 min-h-screen">
     <div id="root"></div>
-
-    <script type="text/babel" data-type="module">
-        const { useState, useEffect, useCallback, useRef } = React;
-        const { 
-          LogIn, LogOut, Scan, CheckCircle, XCircle, 
-          RotateCcw, Download, Settings, User, ShieldCheck, ChevronLeft 
-        } = window.Lucide;
-
-        const VALID_QR_CODE = "KUMAMOTO_HIGO";
-
-        const translations = {
-          ja: {
-            title: '勤怠管理システム', employeeName: '社員名', namePlaceholder: 'お名前を入力してください',
-            scanQr: 'QRコードをスキャン', scanInstructions: '「KUMAMOTO_HIGO」のQRコードをスキャンしてください。',
-            clockIn: '出勤', clockOut: '退勤', adminLogin: '管理者ログイン', password: 'パスワード',
-            login: 'ログイン', back: '戻る', logout: 'ログアウト', adminPanel: '管理者用パネル',
-            exportCsv: 'CSV出力', tableDate: '日付', tableName: '社員名', tableIn: '出勤',
-            tableOut: '退勤', tableStatus: '状態', tableActions: '操作', approve: '承認',
-            reject: '却下', cancel: '取り消し', statusPending: '待機中', statusApproved: '承認済み',
-            statusRejected: '却下済み', errNameEmpty: '名前を入力してください。',
-            errQrInvalid: '無効なQRコードです。', errQrFailed: 'スキャンに失敗しました。',
-            errCameraDenied: 'カメラへのアクセスを許可してください。', errAlreadyIn: '既に出勤済みです。',
-            errNotIn: '先に出勤をしてください。', errAlreadyOut: '既に退勤済みです。',
-            successIn: '出勤を記録しました！', successOut: '退勤を記録しました！', successAction: '更新しました。'
-          },
-          en: {
-            title: 'Attendance System', employeeName: 'Name', namePlaceholder: 'Enter your name',
-            scanQr: 'Scan QR Code', scanInstructions: 'Scan "KUMAMOTO_HIGO" QR code.',
-            clockIn: 'Clock In', clockOut: 'Clock Out', adminLogin: 'Admin Login', password: 'Password',
-            login: 'Login', back: 'Back', logout: 'Logout', adminPanel: 'Admin Dashboard',
-            exportCsv: 'Export CSV', tableDate: 'Date', tableName: 'Name', tableIn: 'In',
-            tableOut: 'Out', tableStatus: 'Status', tableActions: 'Actions', approve: 'Approve',
-            reject: 'Reject', cancel: 'Reset', statusPending: 'Pending', statusApproved: 'Approved',
-            statusRejected: 'Rejected', errNameEmpty: 'Please enter name.',
-            errQrInvalid: 'Invalid QR Code.', errQrFailed: 'Scan failed.',
-            errCameraDenied: 'Camera access denied.', errAlreadyIn: 'Already clocked in.',
-            errNotIn: 'Clock in first.', errAlreadyOut: 'Already clocked out.',
-            successIn: 'Clock-in recorded!', successOut: 'Clock-out recorded!', successAction: 'Updated.'
-          },
-          zh: {
-            title: '出勤管理系统', employeeName: '姓名', namePlaceholder: '请输入姓名',
-            scanQr: '扫描二维码', scanInstructions: '请扫描 "KUMAMOTO_HIGO" 二维码。',
-            clockIn: '上班', clockOut: '下班', adminLogin: '管理员登录', password: '密码',
-            login: '登录', back: '返回', logout: '退出', adminPanel: '管理面板',
-            exportCsv: '导出 CSV', tableDate: '日期', tableName: '姓名', tableIn: '上班',
-            tableOut: '下班', tableStatus: '状态', tableActions: '操作', approve: '批准',
-            reject: '拒绝', cancel: '重置', statusPending: '待处理', statusApproved: '已批准',
-            statusRejected: '已拒绝', errNameEmpty: '请输入姓名。',
-            errQrInvalid: '无效二维码。', errQrFailed: '扫描失败。',
-            errCameraDenied: '请允许摄像头权限。', errAlreadyIn: '已完成上班打卡。',
-            errNotIn: '请先打上班卡。', errAlreadyOut: '已完成下班打卡。',
-            successIn: '上班打卡成功！', successOut: '下班打卡成功！', successAction: '状态已更新。'
-          }
-        };
-
-        const QrScanner = ({ onSuccess, onCancel, t }) => {
-          useEffect(() => {
-            const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: 250 });
-            scanner.render((text) => {
-              scanner.clear();
-              onSuccess(text);
-            }, () => {});
-            return () => { scanner.clear().catch(() => {}); };
-          }, []);
-          return (
-            <div className="w-full">
-              <div id="reader" className="rounded-xl border-2 border-blue-200"></div>
-              <button onClick={onCancel} className="w-full mt-2 py-2 text-gray-500 font-medium underline">{t.back}</button>
-            </div>
-          );
-        };
-
-        const App = () => {
-          const [language, setLanguage] = useState(() => localStorage.getItem('lang') || 'ja');
-          const [screen, setScreen] = useState('punch');
-          const [employeeName, setEmployeeName] = useState('');
-          const [isScanning, setIsScanning] = useState(false);
-          const [records, setRecords] = useState(() => JSON.parse(localStorage.getItem('attendance_records') || '[]'));
-          const [message, setMessage] = useState(null);
-          const [adminPassword, setAdminPassword] = useState('');
-          const [sortKey, setSortKey] = useState('id');
-          const [sortOrder, setSortOrder] = useState('desc');
-
-          const t = translations[language];
-
-          useEffect(() => { localStorage.setItem('lang', language); }, [language]);
-          useEffect(() => { localStorage.setItem('attendance_records', JSON.stringify(records)); }, [records]);
-
-          const showMsg = (text, type = 'success') => {
-            setMessage({ text, type });
-            setTimeout(() => setMessage(null), 4000);
-          };
-
-          const handlePunch = (type) => {
-            if (!employeeName.trim()) return showMsg(t.errNameEmpty, 'error');
-            const today = new Date().toISOString().split('T')[0];
-            const idx = records.findIndex(r => r.name === employeeName && r.date === today);
-
-            if (type === 'in') {
-              if (idx !== -1) return showMsg(t.errAlreadyIn, 'error');
-              setRecords([{ id: Date.now(), date: today, name: employeeName, clockIn: new Date().toLocaleTimeString('ja-JP'), clockOut: null, status: 'pending' }, ...records]);
-              showMsg(t.successIn);
-            } else {
-              if (idx === -1) return showMsg(t.errNotIn, 'error');
-              if (records[idx].clockOut) return showMsg(t.errAlreadyOut, 'error');
-              const newRecs = [...records];
-              newRecs[idx].clockOut = new Date().toLocaleTimeString('ja-JP');
-              setRecords(newRecs);
-              showMsg(t.successOut);
-            }
-          };
-
-          const sortedRecords = [...records].sort((a, b) => {
-            const valA = a[sortKey]; const valB = b[sortKey];
-            if (valA < valB) return sortOrder === 'asc' ? -1 : 1;
-            if (valA > valB) return sortOrder === 'asc' ? 1 : -1;
-            return 0;
-          });
-
-          return (
-            <div className="max-w-4xl mx-auto p-4 md:p-8">
-              <header className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-                <h1 className="text-2xl font-black text-blue-800 flex items-center gap-2"><ShieldCheck size={32} /> {t.title}</h1>
-                <div className="flex gap-2">
-                  {['ja', 'en', 'zh'].map(l => (
-                    <button key={l} onClick={() => setLanguage(l)} className={`px-3 py-1 rounded-full text-xs font-bold ${language === l ? 'bg-blue-600 text-white' : 'bg-white border text-blue-600'}`}>
-                      {l === 'ja' ? '日本語' : l === 'en' ? 'EN' : '中文'}
-                    </button>
-                  ))}
-                  <button onClick={() => setScreen(screen === 'admin' ? 'punch' : 'login')} className="p-2 text-gray-500 hover:text-blue-600">
-                    <Settings size={24} />
-                  </button>
-                </div>
-              </header>
-
-              {message && (
-                <div className={`mb-6 p-4 rounded-xl shadow-lg border-l-4 flex items-center gap-3 animate-pulse ${
-                  message.type === 'success' ? 'bg-green-50 border-green-500 text-green-800' : 'bg-red-50 border-red-500 text-red-800'
-                }`}>
-                  {message.type === 'success' ? <CheckCircle /> : <XCircle />} {message.text}
-                </div>
-              )}
-
-              {screen === 'punch' && (
-                <div className="bg-white p-6 md:p-10 rounded-3xl shadow-2xl border border-gray-100">
-                  <div className="space-y-8">
-                    <div>
-                      <label className="text-lg font-bold text-gray-700 mb-2 flex items-center gap-2"><User size={20} /> {t.employeeName}</label>
-                      <input type="text" value={employeeName} onChange={e => setEmployeeName(e.target.value)} placeholder={t.namePlaceholder} className="w-full px-6 py-4 text-xl border-2 rounded-2xl focus:border-blue-500 outline-none" />
-                    </div>
-                    {isScanning ? (
-                      <QrScanner t={t} onCancel={() => setIsScanning(false)} onSuccess={text => { if(text === VALID_QR_CODE) { setIsScanning(false); showMsg(t.scanInstructions); } else showMsg(t.errQrInvalid, 'error'); }} />
-                    ) : (
-                      <button onClick={() => setIsScanning(true)} className="w-full py-8 bg-blue-50 border-2 border-dashed border-blue-200 rounded-2xl flex flex-col items-center text-blue-600 hover:bg-blue-100"><Scan size={48} /> <span className="font-bold mt-2">{t.scanQr}</span></button>
-                    )}
-                    <div className="grid grid-cols-2 gap-4">
-                      <button onClick={() => handlePunch('in')} className="py-12 bg-green-500 hover:bg-green-600 text-white rounded-3xl flex flex-col items-center gap-2 shadow-lg active:scale-95 transition-all"><LogIn size={40} /> <span className="text-2xl font-black">{t.clockIn}</span></button>
-                      <button onClick={() => handlePunch('out')} className="py-12 bg-orange-500 hover:bg-orange-600 text-white rounded-3xl flex flex-col items-center gap-2 shadow-lg active:scale-95 transition-all"><LogOut size={40} /> <span className="text-2xl font-black">{t.clockOut}</span></button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {screen === 'login' && (
-                <div className="max-w-md mx-auto bg-white p-8 rounded-3xl shadow-xl">
-                  <h2 className="text-xl font-bold mb-6 text-center">{t.adminLogin}</h2>
-                  <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} className="w-full p-4 border rounded-xl mb-4" placeholder={t.password} />
-                  <button onClick={() => { if(adminPassword === 'admin') setScreen('admin'); else showMsg('Error', 'error'); }} className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl">{t.login}</button>
-                </div>
-              )}
-
-              {screen === 'admin' && (
-                <div className="bg-white p-6 rounded-3xl shadow-xl overflow-hidden">
-                  <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-xl font-black">{t.adminPanel}</h2>
-                    <button onClick={() => setScreen('punch')} className="text-red-600 font-bold">{t.logout}</button>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left">
-                      <thead>
-                        <tr className="bg-gray-50 text-gray-400 text-xs uppercase font-bold">
-                          <th className="p-4">{t.tableDate}</th>
-                          <th className="p-4">{t.tableName}</th>
-                          <th className="p-4">{t.tableIn}</th>
-                          <th className="p-4">{t.tableOut}</th>
-                          <th className="p-4">{t.tableStatus}</th>
-                          <th className="p-4"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-100">
-                        {sortedRecords.map(r => (
-                          <tr key={r.id} className={r.status === 'approved' ? 'bg-green-50' : r.status === 'rejected' ? 'bg-red-50' : ''}>
-                            <td className="p-4 font-mono text-xs">{r.date}</td>
-                            <td className="p-4 font-bold">{r.name}</td>
-                            <td className="p-4 text-green-600">{r.clockIn}</td>
-                            <td className="p-4 text-orange-600">{r.clockOut || '-'}</td>
-                            <td className="p-4"><span className="text-xs font-bold uppercase">{r.status}</span></td>
-                            <td className="p-4 text-right flex gap-2">
-                              <button onClick={() => { r.status = 'approved'; setRecords([...records]); showMsg(t.successAction); }} className="text-green-500"><CheckCircle size={20}/></button>
-                              <button onClick={() => { r.status = 'rejected'; setRecords([...records]); showMsg(t.successAction); }} className="text-red-500"><XCircle size={20}/></button>
-                              <button onClick={() => { r.status = 'pending'; setRecords([...records]); showMsg(t.successAction); }} className="text-gray-400"><RotateCcw size={20}/></button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-            </div>
-          );
-        };
-
-        const root = ReactDOM.createRoot(document.getElementById('root'));
-        root.render(<App />);
-    </script>
+<script type="module" src="/index.tsx"></script>
 </body>
 </html>
