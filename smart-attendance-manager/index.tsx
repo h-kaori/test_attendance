@@ -1,10 +1,10 @@
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { createRoot } from 'react-dom/client';
 import { 
   LogIn, LogOut, Scan, CheckCircle, XCircle, 
-  RotateCcw, Download, Settings, User, ShieldCheck, ChevronLeft,
-  Lock, Unlock
+  RotateCcw, Download, Settings, User, ShieldCheck,
+  Lock, Unlock, Loader2, RefreshCw
 } from 'lucide-react';
 
 // --- Types ---
@@ -24,7 +24,7 @@ type Screen = 'punch' | 'login' | 'admin';
 const VALID_QR_CODE = "KUMAMOTO_HIGO";
 
 // --- Translations ---
-const translations = {
+const translations: Record<Language, any> = {
   ja: {
     title: '勤怠管理システム', employeeName: '社員名', namePlaceholder: 'お名前を入力してください',
     scanQr: 'QRコードをスキャン', scanInstructions: '「KUMAMOTO_HIGO」のQRコードをスキャンしてください。',
@@ -35,10 +35,12 @@ const translations = {
     reject: '却下', cancel: '取り消し', statusPending: '待機中', statusApproved: '承認済み',
     statusRejected: '却下済み', errNameEmpty: '名前を入力してください。',
     errQrInvalid: '無効なQRコードです。', errQrFailed: 'スキャンに失敗しました。',
-    errCameraDenied: 'カメラへのアクセスを許可してください。', errAlreadyIn: '既に出勤済みです。',
+    errCameraDenied: 'カメラへのアクセスを許可してください。ブラウザの設定を確認してください。', 
+    errAlreadyIn: '既に出勤済みです。',
     errNotIn: '先に出勤をしてください。', errAlreadyOut: '既に退勤済みです。',
     successIn: '出勤を記録しました！', successOut: '退勤を記録しました！', successAction: '更新しました。',
-    qrRequired: '打刻にはQRスキャンが必要です', qrVerified: '認証完了'
+    qrRequired: '打刻にはQRスキャンが必要です', qrVerified: '認証完了',
+    startingCamera: 'カメラを起動中...'
   },
   en: {
     title: 'Attendance System', employeeName: 'Name', namePlaceholder: 'Enter your name',
@@ -50,10 +52,12 @@ const translations = {
     reject: 'Reject', cancel: 'Reset', statusPending: 'Pending', statusApproved: 'Approved',
     statusRejected: 'Rejected', errNameEmpty: 'Please enter name.',
     errQrInvalid: 'Invalid QR Code.', errQrFailed: 'Scan failed.',
-    errCameraDenied: 'Camera access denied.', errAlreadyIn: 'Already clocked in.',
+    errCameraDenied: 'Camera access denied. Please check browser settings.', 
+    errAlreadyIn: 'Already clocked in.',
     errNotIn: 'Clock in first.', errAlreadyOut: 'Already clocked out.',
     successIn: 'Clock-in recorded!', successOut: 'Clock-out recorded!', successAction: 'Updated.',
-    qrRequired: 'Scan QR to unlock buttons', qrVerified: 'Verified'
+    qrRequired: 'Scan QR to unlock buttons', qrVerified: 'Verified',
+    startingCamera: 'Starting camera...'
   },
   zh: {
     title: '出勤管理系统', employeeName: '姓名', namePlaceholder: '请输入姓名',
@@ -65,35 +69,108 @@ const translations = {
     reject: '拒绝', cancel: '重置', statusPending: '待处理', statusApproved: '已批准',
     statusRejected: '已拒绝', errNameEmpty: '请输入姓名。',
     errQrInvalid: '无效二维码。', errQrFailed: '扫描失败。',
-    errCameraDenied: '请允许摄像头权限。', errAlreadyIn: '已完成上班打卡。',
+    errCameraDenied: '请允许摄像头权限。请检查浏览器设置。', 
+    errAlreadyIn: '已完成上班打卡。',
     errNotIn: '请先打上班卡。', errAlreadyOut: '已完成下班打卡。',
     successIn: '上班打卡成功！', successOut: '下班打卡成功！', successAction: '状态已更新。',
-    qrRequired: '打卡前请先扫描二维码', qrVerified: '已认证'
+    qrRequired: '打卡前请先扫描二维码', qrVerified: '已认证',
+    startingCamera: '正在启动摄像头...'
   }
 };
 
 // --- Components ---
 const QrScanner = ({ onSuccess, onCancel, t }: { onSuccess: (s: string) => void, onCancel: () => void, t: any }) => {
+  const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const scannerRef = useRef<any>(null);
+
   useEffect(() => {
     // @ts-ignore
-    const scanner = new window.Html5QrcodeScanner("reader", { 
-      fps: 10, 
-      qrbox: 250,
-      aspectRatio: 1.0
-    });
-    scanner.render((text: string) => {
-      scanner.clear();
-      onSuccess(text);
-    }, () => {});
-    return () => {
-      scanner.clear().catch(() => {});
+    const Html5Qrcode = window.Html5Qrcode;
+    if (!Html5Qrcode) {
+        setError("QR Library not loaded.");
+        return;
+    }
+
+    const html5QrCode = new Html5Qrcode("reader");
+    scannerRef.current = html5QrCode;
+
+    const config = { 
+      fps: 15, 
+      qrbox: (viewWidth: number, viewHeight: number) => {
+        const size = Math.min(viewWidth, viewHeight) * 0.7;
+        return { width: size, height: size };
+      },
+      aspectRatio: 1.0,
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true 
+      }
     };
-  }, [onSuccess]);
+
+    html5QrCode.start(
+      { facingMode: "environment" }, 
+      config,
+      (decodedText: string) => {
+        if (navigator.vibrate) navigator.vibrate(50); 
+        // 成功時、確実に停止してからコールバックを実行
+        if (html5QrCode.isScanning) {
+          html5QrCode.stop().then(() => {
+            onSuccess(decodedText);
+          }).catch(() => {
+            onSuccess(decodedText);
+          });
+        } else {
+          onSuccess(decodedText);
+        }
+      },
+      () => { /* スキャン失敗（読み取り中）は無視 */ }
+    ).then(() => {
+      setIsLoading(false);
+    }).catch((err: any) => {
+      console.error("Camera error:", err);
+      setIsLoading(false);
+      setError(t.errCameraDenied);
+    });
+
+    return () => {
+      // クリーンアップ時の安全な停止
+      if (scannerRef.current && scannerRef.current.isScanning) {
+        scannerRef.current.stop().catch(() => {});
+      }
+    };
+  }, [onSuccess, t]);
 
   return (
     <div className="w-full">
-      <div id="reader" className="rounded-xl border-2 border-blue-200 overflow-hidden shadow-inner"></div>
-      <button onClick={onCancel} className="w-full mt-4 py-2 text-gray-500 font-medium hover:text-gray-700 underline transition-colors">
+      <div className="relative rounded-3xl border-4 border-blue-100 overflow-hidden shadow-2xl bg-gray-900 aspect-square">
+        <div id="reader" className="w-full h-full object-cover"></div>
+        
+        {isLoading && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gray-800 text-white">
+            <RefreshCw className="animate-spin mb-3 text-blue-400" size={48} />
+            <p className="font-bold text-lg">{t.startingCamera}</p>
+          </div>
+        )}
+
+        {error && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center bg-gray-900/95">
+            <XCircle className="text-red-500 mb-4" size={64} />
+            <p className="text-white font-bold text-sm leading-relaxed">{error}</p>
+          </div>
+        )}
+
+        {!error && !isLoading && (
+          <>
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <div className="w-[70%] h-[70%] border-4 border-blue-500 rounded-3xl animate-pulse shadow-[0_0_0_1000px_rgba(0,0,0,0.5)]"></div>
+            </div>
+            <div className="absolute top-4 left-0 right-0 text-center pointer-events-none">
+               <span className="bg-black/60 text-white px-4 py-1 rounded-full text-xs font-bold tracking-widest uppercase">Scanning...</span>
+            </div>
+          </>
+        )}
+      </div>
+      <button onClick={onCancel} className="w-full mt-6 py-4 bg-gray-100 text-gray-600 font-black rounded-2xl hover:bg-gray-200 transition-all active:scale-95">
         {t.back}
       </button>
     </div>
@@ -122,11 +199,6 @@ const App = () => {
     setTimeout(() => setMessage(null), 4000);
   };
 
-  const handleNameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setEmployeeName(e.target.value);
-    setIsVerified(false); // 名前が変わったら再認証を求める
-  };
-
   const handlePunch = (type: 'in' | 'out') => {
     if (!employeeName.trim()) return showMsg(t.errNameEmpty, 'error');
     if (!isVerified) return showMsg(t.qrRequired, 'error');
@@ -153,13 +225,7 @@ const App = () => {
       setRecords(newRecs);
       showMsg(t.successOut);
     }
-    
-    setIsVerified(false); // 打刻後は認証状態をリセット
-  };
-
-  const updateStatus = (id: number, newStatus: Status) => {
-    setRecords(records.map(r => r.id === id ? { ...r, status: newStatus } : r));
-    showMsg(t.successAction);
+    setIsVerified(false); 
   };
 
   const sortedRecords = [...records].sort((a, b) => {
@@ -175,180 +241,167 @@ const App = () => {
     const rows = records.map(r => `${r.date},${r.name},${r.clockIn},${r.clockOut || '-'},${r.status}`).join('\n');
     const blob = new Blob(["\uFEFF" + header + rows], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
+    
     const link = document.createElement('a');
     link.href = url;
     link.download = `attendance_${new Date().toISOString().split('T')[0]}.csv`;
+    link.style.display = 'none';
+    
+    document.body.appendChild(link);
     link.click();
+    
+    // 安全に削除するためのバッファ
+    setTimeout(() => {
+      if (link.parentNode === document.body) {
+        document.body.removeChild(link);
+      }
+      URL.revokeObjectURL(url);
+    }, 100);
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-4 md:p-8">
-      <header className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
-        <h1 className="text-2xl font-black text-blue-800 flex items-center gap-2">
-          <ShieldCheck size={32} /> {t.title}
+    <div className="max-w-4xl mx-auto p-4 md:p-8 animate-in">
+      <header className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4">
+        <h1 className="text-3xl font-black text-blue-900 flex items-center gap-3">
+          <ShieldCheck size={40} className="text-blue-600" /> {t.title}
         </h1>
-        <div className="flex gap-2">
-          {(['ja', 'en', 'zh'] as Language[]).map(l => (
-            <button key={l} onClick={() => setLanguage(l)} 
-              className={`px-3 py-1 rounded-full text-xs font-bold transition-all ${language === l ? 'bg-blue-600 text-white' : 'bg-white border text-blue-600 hover:bg-blue-50'}`}>
-              {l === 'ja' ? '日本語' : l === 'en' ? 'EN' : '中文'}
-            </button>
-          ))}
-          <button onClick={() => setScreen(screen === 'admin' ? 'punch' : 'login')} className="p-2 text-gray-400 hover:text-blue-600 transition-colors">
+        <div className="flex items-center gap-4">
+          <div className="flex bg-white p-1 rounded-full shadow-inner border">
+            {(['ja', 'en', 'zh'] as Language[]).map(l => (
+              <button key={l} onClick={() => setLanguage(l)} 
+                className={`px-4 py-2 rounded-full text-xs font-black transition-all ${language === l ? 'bg-blue-600 text-white shadow-lg' : 'text-gray-400 hover:text-blue-600'}`}>
+                {l === 'ja' ? '日本語' : l === 'en' ? 'EN' : '中文'}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setScreen(screen === 'admin' ? 'punch' : 'login')} className="p-3 bg-white rounded-full border shadow-sm text-gray-400 hover:text-blue-600 transition-all hover:rotate-90">
             <Settings size={24} />
           </button>
         </div>
       </header>
 
       {message && (
-        <div className={`mb-6 p-4 rounded-xl shadow-lg border-l-4 flex items-center gap-3 animate-in fade-in slide-in-from-top-4 duration-300 ${
+        <div className={`fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-md p-5 rounded-3xl shadow-2xl border-2 flex items-center gap-4 animate-in ${
           message.type === 'success' ? 'bg-green-50 border-green-500 text-green-800' : 'bg-red-50 border-red-500 text-red-800'
         }`}>
-          {message.type === 'success' ? <CheckCircle className="flex-shrink-0" /> : <XCircle className="flex-shrink-0" />}
-          <span className="font-bold">{message.text}</span>
+          {message.type === 'success' ? <CheckCircle className="text-green-500" size={28}/> : <XCircle className="text-red-500" size={28}/>}
+          <span className="font-black text-lg">{message.text}</span>
         </div>
       )}
 
       {screen === 'punch' && (
-        <div className="bg-white p-6 md:p-10 rounded-3xl shadow-2xl border border-gray-100">
-          <div className="space-y-8">
+        <main className="bg-white p-6 md:p-12 rounded-[2.5rem] shadow-2xl border border-blue-50">
+          <div className="space-y-10">
             <div>
-              <div className="flex justify-between items-end mb-2">
-                <label className="text-lg font-bold text-gray-700 flex items-center gap-2">
-                  <User size={20} /> {t.employeeName}
+              <div className="flex justify-between items-end mb-3">
+                <label className="text-xl font-black text-gray-800 flex items-center gap-2 uppercase tracking-widest">
+                  <User size={24} className="text-blue-600" /> {t.employeeName}
                 </label>
                 {isVerified && (
-                  <span className="bg-green-100 text-green-700 text-xs font-black px-2 py-1 rounded-full flex items-center gap-1 animate-pulse">
-                    <CheckCircle size={12} /> {t.qrVerified}
+                  <span className="bg-green-100 text-green-700 text-xs font-black px-4 py-1.5 rounded-full flex items-center gap-2 animate-pulse border-2 border-green-200">
+                    <CheckCircle size={14} /> {t.qrVerified}
                   </span>
                 )}
               </div>
-              <input 
-                type="text" 
-                value={employeeName} 
-                onChange={handleNameChange} 
-                placeholder={t.namePlaceholder} 
-                className="w-full px-6 py-4 text-xl border-2 rounded-2xl focus:border-blue-500 focus:ring-4 focus:ring-blue-100 outline-none transition-all" 
-              />
+              <input type="text" value={employeeName} onChange={e => {setEmployeeName(e.target.value); setIsVerified(false);}} placeholder={t.namePlaceholder} 
+                className="w-full px-8 py-5 text-2xl font-bold border-4 border-gray-100 rounded-3xl focus:border-blue-500 focus:ring-8 focus:ring-blue-50 outline-none transition-all placeholder:text-gray-300" />
             </div>
 
             {isScanning ? (
               <QrScanner t={t} onCancel={() => setIsScanning(false)} onSuccess={text => { 
-                if(text === VALID_QR_CODE) { 
-                  setIsScanning(false); 
-                  setIsVerified(true);
-                  showMsg(t.qrVerified); 
-                } 
+                if(text === VALID_QR_CODE) { setIsScanning(false); setIsVerified(true); showMsg(t.qrVerified); } 
                 else showMsg(t.errQrInvalid, 'error'); 
               }} />
             ) : (
-              <button 
-                onClick={() => setIsScanning(true)} 
-                className={`w-full py-8 border-2 border-dashed rounded-2xl flex flex-col items-center transition-all ${
-                  isVerified 
-                  ? 'bg-green-50 border-green-200 text-green-600' 
-                  : 'bg-blue-50 border-blue-200 text-blue-600 hover:bg-blue-100'
-                }`}
-              >
-                {isVerified ? <Unlock size={48} /> : <Scan size={48} />}
-                <span className="font-bold mt-2">{isVerified ? t.qrVerified : t.scanQr}</span>
+              <button onClick={() => setIsScanning(true)} 
+                className={`w-full py-12 border-4 border-dashed rounded-[2rem] flex flex-col items-center transition-all transform active:scale-95 ${
+                  isVerified ? 'bg-green-50 border-green-300 text-green-600' : 'bg-blue-50 border-blue-300 text-blue-600 hover:bg-blue-100'
+                }`}>
+                {isVerified ? <Unlock size={64} /> : <Scan size={64} />}
+                <span className="font-black mt-4 text-2xl">{isVerified ? t.qrVerified : t.scanQr}</span>
+                {!isVerified && <p className="text-sm font-bold opacity-60 mt-2 px-6 text-center">{t.scanInstructions}</p>}
               </button>
             )}
 
-            <div className="grid grid-cols-2 gap-4">
-              <button 
-                onClick={() => handlePunch('in')} 
-                disabled={!isVerified || isScanning}
-                className={`py-10 rounded-3xl flex flex-col items-center gap-2 shadow-lg transition-all transform active:scale-95 ${
-                  isVerified 
-                  ? 'bg-green-500 hover:bg-green-600 text-white cursor-pointer' 
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed grayscale'
-                }`}
-              >
-                <LogIn size={40} />
-                <span className="text-2xl font-black">{t.clockIn}</span>
-                {!isVerified && <Lock size={16} className="mt-1 opacity-50" />}
+            <div className="grid grid-cols-2 gap-6">
+              <button onClick={() => handlePunch('in')} disabled={!isVerified || isScanning}
+                className={`py-12 rounded-[2rem] flex flex-col items-center gap-3 shadow-2xl transition-all transform active:scale-95 ${
+                  isVerified ? 'bg-gradient-to-br from-green-500 to-green-600 text-white' : 'bg-gray-100 text-gray-300 grayscale cursor-not-allowed'
+                }`}>
+                <LogIn size={48} />
+                <span className="text-3xl font-black">{t.clockIn}</span>
+                {!isVerified && <Lock size={20} className="mt-1 opacity-30" />}
               </button>
-              <button 
-                onClick={() => handlePunch('out')} 
-                disabled={!isVerified || isScanning}
-                className={`py-10 rounded-3xl flex flex-col items-center gap-2 shadow-lg transition-all transform active:scale-95 ${
-                  isVerified 
-                  ? 'bg-orange-500 hover:bg-orange-600 text-white cursor-pointer' 
-                  : 'bg-gray-100 text-gray-400 cursor-not-allowed grayscale'
-                }`}
-              >
-                <LogOut size={40} />
-                <span className="text-2xl font-black">{t.clockOut}</span>
-                {!isVerified && <Lock size={16} className="mt-1 opacity-50" />}
+              <button onClick={() => handlePunch('out')} disabled={!isVerified || isScanning}
+                className={`py-12 rounded-[2rem] flex flex-col items-center gap-3 shadow-2xl transition-all transform active:scale-95 ${
+                  isVerified ? 'bg-gradient-to-br from-orange-500 to-orange-600 text-white' : 'bg-gray-100 text-gray-300 grayscale cursor-not-allowed'
+                }`}>
+                <LogOut size={48} />
+                <span className="text-3xl font-black">{t.clockOut}</span>
+                {!isVerified && <Lock size={20} className="mt-1 opacity-30" />}
               </button>
             </div>
-            
-            {!isVerified && !isScanning && (
-              <p className="text-center text-sm font-bold text-orange-400 animate-pulse">
-                ⚠️ {t.qrRequired}
-              </p>
-            )}
           </div>
-        </div>
+        </main>
       )}
 
       {screen === 'login' && (
-        <div className="max-w-md mx-auto bg-white p-8 rounded-3xl shadow-xl border">
-          <h2 className="text-xl font-bold mb-6 text-center">{t.adminLogin}</h2>
+        <div className="max-w-md mx-auto bg-white p-10 rounded-[2.5rem] shadow-2xl border">
+          <h2 className="text-2xl font-black mb-8 text-center text-gray-800 tracking-tighter">{t.adminLogin}</h2>
           <input type="password" value={adminPassword} onChange={e => setAdminPassword(e.target.value)} 
-            className="w-full p-4 border rounded-xl mb-4 focus:ring-2 focus:ring-blue-500 outline-none" placeholder={t.password} />
+            className="w-full p-5 border-4 border-gray-50 rounded-2xl mb-6 focus:border-blue-500 outline-none text-center text-2xl tracking-[1em]" placeholder="••••" />
           <button onClick={() => { if(adminPassword === 'admin') setScreen('admin'); else showMsg('Invalid Password', 'error'); }} 
-            className="w-full py-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors">
+            className="w-full py-5 bg-blue-600 text-white font-black rounded-2xl hover:bg-blue-700 transition-all shadow-xl active:scale-95">
             {t.login}
           </button>
+          <button onClick={() => setScreen('punch')} className="w-full mt-4 py-3 text-gray-400 font-bold hover:text-gray-600">{t.back}</button>
         </div>
       )}
 
       {screen === 'admin' && (
-        <div className="bg-white p-6 rounded-3xl shadow-xl border overflow-hidden">
-          <div className="flex flex-col md:flex-row justify-between items-center mb-6 gap-4">
-            <h2 className="text-2xl font-black text-gray-800">{t.adminPanel}</h2>
-            <div className="flex gap-2">
-              <button onClick={exportCSV} className="flex items-center gap-1 px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg font-bold text-gray-700">
-                <Download size={18} /> {t.exportCsv}
+        <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl border overflow-hidden">
+          <div className="flex flex-col md:flex-row justify-between items-center mb-8 gap-4">
+            <h2 className="text-3xl font-black text-gray-800 tracking-tighter">{t.adminPanel}</h2>
+            <div className="flex gap-3">
+              <button onClick={exportCSV} className="flex items-center gap-2 px-6 py-3 bg-blue-50 hover:bg-blue-100 rounded-2xl font-black text-blue-700 transition-all active:scale-95">
+                <Download size={20} /> {t.exportCsv}
               </button>
-              <button onClick={() => setScreen('punch')} className="px-4 py-2 bg-red-50 text-red-600 hover:bg-red-100 rounded-lg font-bold">
+              <button onClick={() => setScreen('punch')} className="px-6 py-3 bg-red-50 text-red-600 hover:bg-red-100 rounded-2xl font-black transition-all active:scale-95">
                 {t.logout}
               </button>
             </div>
           </div>
           <div className="overflow-x-auto">
-            <table className="w-full text-left min-w-[600px]">
+            <table className="w-full text-left min-w-[700px]">
               <thead>
-                <tr className="bg-gray-50 text-gray-400 text-xs uppercase font-bold border-b">
-                  <th className="p-4 cursor-pointer" onClick={() => { setSortKey('date'); setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); }}>{t.tableDate}</th>
-                  <th className="p-4 cursor-pointer" onClick={() => { setSortKey('name'); setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); }}>{t.tableName}</th>
-                  <th className="p-4">{t.tableIn}</th>
-                  <th className="p-4">{t.tableOut}</th>
-                  <th className="p-4">{t.tableStatus}</th>
-                  <th className="p-4"></th>
+                <tr className="bg-gray-50 text-gray-400 text-xs uppercase font-black border-b tracking-widest">
+                  <th className="p-5 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setSortKey('date'); setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); }}>{t.tableDate}</th>
+                  <th className="p-5 cursor-pointer hover:text-blue-600 transition-colors" onClick={() => { setSortKey('name'); setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc'); }}>{t.tableName}</th>
+                  <th className="p-5">{t.tableIn}</th>
+                  <th className="p-5">{t.tableOut}</th>
+                  <th className="p-5">{t.tableStatus}</th>
+                  <th className="p-5"></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-gray-100 font-bold">
                 {sortedRecords.map(r => (
-                  <tr key={r.id} className={`transition-colors ${r.status === 'approved' ? 'bg-green-50' : r.status === 'rejected' ? 'bg-red-50' : ''}`}>
-                    <td className="p-4 font-mono text-sm">{r.date}</td>
-                    <td className="p-4 font-bold">{r.name}</td>
-                    <td className="p-4 text-green-700 font-bold">{r.clockIn}</td>
-                    <td className="p-4 text-orange-700 font-bold">{r.clockOut || '-'}</td>
-                    <td className="p-4">
-                      <span className={`px-2 py-1 rounded text-[10px] font-black uppercase ${
-                        r.status === 'approved' ? 'bg-green-200 text-green-800' :
-                        r.status === 'rejected' ? 'bg-red-200 text-red-800' : 'bg-gray-200 text-gray-600'
+                  <tr key={r.id} className={`transition-all hover:bg-gray-50/50 ${r.status === 'approved' ? 'bg-green-50/30' : r.status === 'rejected' ? 'bg-red-50/30' : ''}`}>
+                    <td className="p-5 font-mono text-sm text-gray-500">{r.date}</td>
+                    <td className="p-5 text-lg text-gray-800">{r.name}</td>
+                    <td className="p-5 text-green-700 text-xl font-black">{r.clockIn}</td>
+                    <td className="p-5 text-orange-700 text-xl font-black">{r.clockOut || '—'}</td>
+                    <td className="p-5">
+                      <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest border ${
+                        r.status === 'approved' ? 'bg-green-100 text-green-700 border-green-200' :
+                        r.status === 'rejected' ? 'bg-red-100 text-red-700 border-red-200' : 'bg-gray-100 text-gray-400 border-gray-200'
                       }`}>
                         {r.status === 'approved' ? t.statusApproved : r.status === 'rejected' ? t.statusRejected : t.statusPending}
                       </span>
                     </td>
-                    <td className="p-4 text-right flex justify-end gap-1">
-                      <button onClick={() => updateStatus(r.id, 'approved')} className="p-2 text-green-600 hover:bg-green-100 rounded-lg transition-colors"><CheckCircle size={20}/></button>
-                      <button onClick={() => updateStatus(r.id, 'rejected')} className="p-2 text-red-600 hover:bg-red-100 rounded-lg transition-colors"><XCircle size={20}/></button>
-                      <button onClick={() => updateStatus(r.id, 'pending')} className="p-2 text-gray-400 hover:bg-gray-100 rounded-lg transition-colors"><RotateCcw size={20}/></button>
+                    <td className="p-5 text-right flex justify-end gap-2">
+                      <button onClick={() => { setRecords(records.map(rec => rec.id === r.id ? { ...rec, status: 'approved' } : rec)); showMsg(t.successAction); }} className="p-3 text-green-600 hover:bg-green-100 rounded-full transition-all"><CheckCircle size={24}/></button>
+                      <button onClick={() => { setRecords(records.map(rec => rec.id === r.id ? { ...rec, status: 'rejected' } : rec)); showMsg(t.successAction); }} className="p-3 text-red-600 hover:bg-red-100 rounded-full transition-all"><XCircle size={24}/></button>
+                      <button onClick={() => { setRecords(records.map(rec => rec.id === r.id ? { ...rec, status: 'pending' } : rec)); showMsg(t.successAction); }} className="p-3 text-gray-400 hover:bg-gray-100 rounded-full transition-all"><RotateCcw size={24}/></button>
                     </td>
                   </tr>
                 ))}
@@ -358,8 +411,8 @@ const App = () => {
         </div>
       )}
       
-      <footer className="mt-12 text-center text-gray-300 text-xs">
-        <p>© 2024 Attendance Manager - Security Enhanced Ver.</p>
+      <footer className="mt-16 text-center text-gray-400 text-xs font-black uppercase tracking-[0.3em] pb-10">
+        <p>© 2024 Smart Attendance System - Global High Precision Ver.</p>
       </footer>
     </div>
   );
