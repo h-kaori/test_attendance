@@ -1,0 +1,6 @@
+{
+  "buildCommand": "cd smart-attendance-manager && npm run build",
+  "outputDirectory": "smart-attendance-manager/dist",
+  "installCommand": "cd smart-attendance-manager && npm install",
+  "framework": null
+}
